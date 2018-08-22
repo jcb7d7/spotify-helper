@@ -9,32 +9,50 @@
 import UIKit
 import SafariServices
 import AVFoundation
+import SDWebImage
 
-class ViewController: UIViewController, SPTAudioStreamingPlaybackDelegate, SPTAudioStreamingDelegate, UITableViewDelegate, UITableViewDataSource {
+class SongTableViewCell: UITableViewCell {
+    
+    @IBOutlet weak var songTextLabel: UILabel!
+    @IBOutlet weak var albumImageView: UIImageView!
+    @IBOutlet weak var artistButton: UIButton!
+    
+}
+
+class Top50ViewController: UIViewController, SPTAudioStreamingPlaybackDelegate, SPTAudioStreamingDelegate, UITableViewDelegate, UITableViewDataSource {
     
     var auth = SPTAuth.defaultInstance()!
-    var session:SPTSession!
+    var session: SPTSession!
     var player: SPTAudioStreamingController?
-    var loginUrl: URL?
     var isLoadingSongs: Bool = false
     var top50Wrapper: SongWrapper?
+    var playback: Playback?
     
     @IBOutlet weak var tableView: UITableView!
-    @IBOutlet weak var loginButton: UIButton!
-
+    @IBOutlet weak var playPauseButton: UIButton!
+    @IBOutlet weak var nextTrackButton: UIButton!
+    @IBOutlet weak var prevTrackButton: UIButton!
+    
     func setup() {
-        auth.clientID = "432c0b2c7a8e4379b4f3ea504e42d501";
-        auth.redirectURL = URL(string: "spotifyhelper://render");
-        auth.requestedScopes = [SPTAuthStreamingScope, SPTAuthPlaylistReadPrivateScope, SPTAuthPlaylistModifyPublicScope, SPTAuthPlaylistModifyPrivateScope, SPTAuthUserReadTopScope];
-        loginUrl = auth.spotifyWebAuthenticationURL();
+        self.playPauseButton.isHidden = true
+        self.nextTrackButton.isHidden = true
+        self.prevTrackButton.isHidden = true
     }
-
-    @IBAction func loginButtonPressed(_ sender: Any) {
-        if UIApplication.shared.openURL(loginUrl!) {
-            if auth.canHandle(auth.redirectURL) {
-                // To do - build in error handling
-            }
+    
+    
+    
+    @IBAction func playPausePressed(_ sender: Any) {
+        Playback.playPause(player: player!)
+        if (Playback.isPlaying) {
+            self.playPauseButton.setImage(UIImage(named: "pause"), for: .normal)
+        } else {
+            self.playPauseButton.setImage(UIImage(named: "play"), for: .normal)
         }
+    }
+    
+    @IBAction func backPressed(_ sender: Any) {
+        try? player?.stop()
+        dismiss(animated: true, completion: nil)
     }
     
     func numberOfSections(in tableView: UITableView) -> Int {
@@ -53,20 +71,29 @@ class ViewController: UIViewController, SPTAudioStreamingPlaybackDelegate, SPTAu
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         self.player?.playSpotifyURI(self.top50Wrapper?.items![indexPath.row].uri, startingWith: 0, startingWithPosition: 0, callback: { (error) in
             if (error == nil) {
-                print("playing!")
+                Playback.isPlaying = true;
+                self.playPauseButton.setImage(UIImage(named: "pause"), for: .normal)
+                self.nextTrackButton.setImage(UIImage(named: "next"), for: .normal)
+                self.prevTrackButton.setImage(UIImage(named: "prev"), for: .normal)
+                self.playPauseButton.isHidden = false
+                self.nextTrackButton.isHidden = false
+                self.prevTrackButton.isHidden = false
             }
         })
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "Song", for: indexPath)
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Song", for: indexPath) as! SongTableViewCell
         
-        if self.top50Wrapper!.total! >= indexPath.row {
-            let songToShow = self.top50Wrapper?.items![indexPath.row]
-            cell.textLabel?.text = songToShow?.name!
-            cell.detailTextLabel?.text = songToShow?.album?.name
+        if (self.top50Wrapper!.items!.count >= indexPath.row) {
+            let songToShow: Song? = self.top50Wrapper?.items![indexPath.row]
+            cell.songTextLabel?.text = songToShow?.name
+            cell.albumImageView?.sd_setShowActivityIndicatorView(true)
+            cell.albumImageView?.sd_setIndicatorStyle(.gray)
+            cell.albumImageView?.sd_setImage(with: URL(string: (songToShow?.album?.artUri)!))
             
-            // See if we need to load more species
+            
+            
             let rowsToLoadFromBottom = 5;
             let rowsLoaded = self.top50Wrapper?.items?.count
             if (!self.isLoadingSongs && (indexPath.row >= (rowsLoaded! - rowsToLoadFromBottom))) {
@@ -85,7 +112,7 @@ class ViewController: UIViewController, SPTAudioStreamingPlaybackDelegate, SPTAu
         if (self.top50Wrapper != nil) {
             if ((self.top50Wrapper?.items?.count)! < Int((self.top50Wrapper?.total)!)) {
                 let dict: NSDictionary = SongWrapper.getSongs(songHref: (self.top50Wrapper?.next)!, token: self.session.accessToken)
-                self.top50Wrapper?.addNext(top50Response: dict)
+                self.top50Wrapper?.addNext(top50Response: dict, token: self.session.accessToken)
                 self.isLoadingSongs = false
                 self.tableView.reloadData()
             }
@@ -95,26 +122,14 @@ class ViewController: UIViewController, SPTAudioStreamingPlaybackDelegate, SPTAu
     override func viewDidLoad() {
         super.viewDidLoad()
         setup()
-        NotificationCenter.default.addObserver(self, selector: #selector(ViewController.updateAfterFirstLogin), name: NSNotification.Name(rawValue: "loginSuccessfull"), object: nil)
         self.tableView.delegate = self
         self.tableView.dataSource = self
+        self.tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
+        initializePlayer(authSession: self.session)
         // Do any additional setup after loading the view, typically from a nib.
     }
     
-    @objc
-    func updateAfterFirstLogin () {
-        loginButton.isHidden = true
-        let userDefaults = UserDefaults.standard
-        
-        if let sessionObj:AnyObject = userDefaults.object(forKey: "SpotifySession") as AnyObject? {
-            let sessionDataObj = sessionObj as! Data
-            let firstTimeSession = NSKeyedUnarchiver.unarchiveObject(with: sessionDataObj) as! SPTSession
-            self.session = firstTimeSession
-            initializePlayer(authSession: session)
-        }
-    }
-    
-    func initializePlayer(authSession:SPTSession){
+    func initializePlayer(authSession: SPTSession){
         if self.player == nil {
             self.player = SPTAudioStreamingController.sharedInstance()
             self.player!.playbackDelegate = self
@@ -124,9 +139,9 @@ class ViewController: UIViewController, SPTAudioStreamingPlaybackDelegate, SPTAu
         }
     }
 
+    
+    
     func audioStreamingDidLogin(_ audioStreaming: SPTAudioStreamingController!) {
-        // after a user authenticates a session, the SPTAudioStreamingController is then initialized and this method called
-        print("logged in")
         self.top50Wrapper = SongWrapper(songHref: SongWrapper.TOP50ENDPOINT, token: session.accessToken)
         self.tableView.reloadData()
     }

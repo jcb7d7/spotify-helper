@@ -31,12 +31,15 @@ class SongWrapper: NSObject {
         self.items = []
         if let songs = dict["items"] as? [[String: Any]] {
             for song in songs {
-                self.items?.append(Song(json: song))
+                let newSong: Song = Song(json: song)
+                newSong.album = SongWrapper.getAlbum(anyAlbum: song["album"] as! [String: Any], token: token)
+                newSong.artists = SongWrapper.getArtists(anyArtists: song["artists"] as! NSArray)
+                self.items?.append(newSong)
             }
         }
     }
     
-    public func addNext(top50Response: NSDictionary) {
+    public func addNext(top50Response: NSDictionary, token: String) {
         self.href = top50Response["href"] as? String
         self.next = top50Response["next"] as? String
         self.previous = top50Response["previous"] as? String
@@ -45,9 +48,24 @@ class SongWrapper: NSObject {
         
         if let songs = top50Response["items"] as? [[String: Any]] {
             for song in songs {
-                self.items?.append(Song(json: song))
+                let newSong: Song = Song(json: song)
+                newSong.album = SongWrapper.getAlbum(anyAlbum: song["album"] as! [String: Any], token: token)
+                newSong.artists = SongWrapper.getArtists(anyArtists: song["artists"] as! NSArray)
+                self.items?.append(newSong)
             }
         }
+    }
+    
+    public static func getAlbum(anyAlbum: [String: Any], token: String) -> Album {
+        return Album(json: anyAlbum, token: token)
+    }
+    
+    public static func getArtists(anyArtists: NSArray) -> [Artist] {
+        var artistArray: [Artist] = [];
+        for rawArtist in anyArtists {
+            artistArray.append(Artist(json: rawArtist as! [String: Any]))
+        }
+        return artistArray
     }
     
     public static func getSongs(songHref: String, token: String) -> NSDictionary {

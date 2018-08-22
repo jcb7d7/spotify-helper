@@ -1,0 +1,6 @@
+framework module Pods_SpotifyHelperiOS {
+  umbrella header "Pods-SpotifyHelperiOS-umbrella.h"
+
+  export *
+  module * { export * }
+}
